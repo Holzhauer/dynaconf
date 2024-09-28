@@ -34,13 +34,13 @@ test_requirements = [
 
 
 setup(
-    name="dynaconf",
+    name="dynaconf_ahid",
     version=read("dynaconf", "VERSION"),
     url="https://github.com/dynaconf/dynaconf",
     license="MIT",
     license_files=["LICENSE", "vendor_licenses/*"],
-    author="Bruno Rocha",
-    author_email="rochacbruno@gmail.com",
+    author=["Bruno Rocha", "Sascha Holzhuaer"],
+    author_email=["rochacbruno@gmail.com", "sascha.holzhauer@iee.fraunhofer.de"],
     description="The dynamic configurator for your Python Project",
     long_description=read("README.md"),
     long_description_content_type="text/markdown",
