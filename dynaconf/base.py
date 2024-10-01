@@ -942,6 +942,11 @@ class Settings:
             else:  # odd cases like [2]0
                 raise (ValueError("Invalid field:", k))
 
+        if "loader_identifier" in kwargs:
+            merge = kwargs["loader_identifier"].merged
+        else:
+            merge = empty
+            
         if existing_data:
             if self.get("DYNABOXIFY", True):
                 old_data = DynaBox(
@@ -954,9 +959,10 @@ class Settings:
                 old=old_data,
                 new=new_data,
                 full_path=split_keys,
-                list_merge="deep",  # when to use deep / shallow replace?
+                list_merge="merge" if merge is empty or merge else "shallow" #"merge" #"deep",  # when to use deep / shallow replace?
             )
-        self.update(data=new_data, tomlfy=tomlfy, validate=validate, **kwargs)
+            
+        self.update(data=new_data, tomlfy=tomlfy, validate=validate, merge=merge, **kwargs)
 
     def set(
         self,
