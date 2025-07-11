@@ -1,19 +1,20 @@
 from __future__ import annotations
 
+from collections import defaultdict
+from contextlib import contextmanager
+from contextlib import suppress
 import copy
 import importlib
 import inspect
 import os
-import re
-import warnings
-from collections import defaultdict
-from contextlib import contextmanager
-from contextlib import suppress
 from pathlib import Path
+import re
 from typing import Any
 from typing import Callable
+import warnings
 
 from dynaconf import default_settings
+from dynaconf.config import AHIDConfig
 from dynaconf.loaders import default_loader
 from dynaconf.loaders import enable_external_loaders
 from dynaconf.loaders import env_loader
@@ -24,23 +25,23 @@ from dynaconf.loaders import settings_loader
 from dynaconf.loaders import yaml_loader
 from dynaconf.loaders.base import SourceMetadata
 from dynaconf.utils import BANNER
+from dynaconf.utils import RENAMED_VARS
 from dynaconf.utils import compat_kwargs
 from dynaconf.utils import ensure_a_list
 from dynaconf.utils import ensure_upperfied_list
 from dynaconf.utils import missing
 from dynaconf.utils import object_merge
 from dynaconf.utils import recursively_evaluate_lazy_format
-from dynaconf.utils import RENAMED_VARS
 from dynaconf.utils import upperfy
 from dynaconf.utils.boxing import DynaBox
 from dynaconf.utils.files import find_file
 from dynaconf.utils.files import glob
-from dynaconf.utils.functional import empty
 from dynaconf.utils.functional import LazyObject
+from dynaconf.utils.functional import empty
+from dynaconf.utils.parse_conf import Lazy
 from dynaconf.utils.parse_conf import apply_converter
 from dynaconf.utils.parse_conf import boolean_fix
 from dynaconf.utils.parse_conf import converters
-from dynaconf.utils.parse_conf import Lazy
 from dynaconf.utils.parse_conf import parse_conf_data
 from dynaconf.utils.parse_conf import true_values
 from dynaconf.validator import ValidationError
@@ -146,7 +147,7 @@ class LazySettings(LazyObject):
         ):
             return self._wrapped.get_fresh(name)
         value = getattr(self._wrapped, name)
-        if name not in RESERVED_ATTRS:
+        if name not in RESERVED_ATTRS and AHIDConfig.evaluate:
             return recursively_evaluate_lazy_format(value, self)
         return value
 
