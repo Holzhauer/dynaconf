@@ -19,6 +19,8 @@ from typing import Any
 from typing import Optional
 from typing import Union
 
+from dynaconf.config import AHIDConfig
+
 from dynaconf import default_settings
 from dynaconf.loaders import default_loader
 from dynaconf.loaders import enable_external_loaders
@@ -651,7 +653,7 @@ class Settings:
             self.execute_loaders(key=key)
 
         data = _get_with_default(parent or core.store, key, default)
-        if config.dynaboxify is False:
+        if config.dynaboxify is False and AHIDConfig.evaluate:
             data = recursively_evaluate_lazy_format(data, self)
         if cast:
             data = apply_converter(cast, data, box_settings=self)
@@ -1107,6 +1109,11 @@ class Settings:
                 else:  # odd cases like [2]0
                     raise (ValueError("Invalid field:", k))
 
+        if "loader_identifier" in kwargs:
+            merge = kwargs["loader_identifier"].merged
+        else:
+            merge = empty
+
         if existing_data:
             if config.dynaboxify:
                 old_data: dict | DataDict = DataDict(
@@ -1119,7 +1126,7 @@ class Settings:
                 old=old_data,
                 new=new_data,
                 full_path=split_keys,
-                list_merge=list_merge,  # when to use deep / shallow replace?
+                list_merge="merge" if merge is empty or merge else "shallow"  # when to use deep / shallow replace?
             )
         # `new_data` is keyed by the already-resolved top level key
         # (`split_keys[0]`). With index merge disabled a bracket is a literal
@@ -1132,6 +1139,7 @@ class Settings:
             validate=validate,
             tomlfy_filter=tomlfy_filter,
             dotted_lookup=False,
+            merge=merge,
             **kwargs,
         )
 
@@ -1254,7 +1262,7 @@ class Settings:
             if existing:
                 # update SourceMetadata (for inspecting purposes)
                 source_metadata = source_metadata._replace(merged=True)
-                parsed = object_merge(existing, parsed.unwrap())
+                parsed = object_merge(existing, parsed.unwrap(), list_merge="merge")
             else:
                 parsed = parsed.unwrap()
 
@@ -1263,7 +1271,7 @@ class Settings:
             # `dynaconf_merge` used in file root `merge=True`
             if merge and merge is not empty:
                 source_metadata = source_metadata._replace(merged=True)
-                parsed = object_merge(existing, parsed)
+                parsed = object_merge(existing, parsed, list_merge="merge")
             else:
                 # `dynaconf_merge` may be used within the key structure
                 # Or merge_enabled is set to True
@@ -1374,7 +1382,7 @@ class Settings:
         value,
         identifier: SourceMetadata | None = None,
         context_merge=empty,
-        list_merge="merge",
+        list_merge=None, #"merge",
     ):
         """
         Merge the new value being set with the existing value before set

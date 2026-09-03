@@ -45,7 +45,7 @@ def object_merge(
     new: Any,
     unique: bool = False,
     full_path: Optional[list[str]] = None,
-    list_merge: ListMergeOptions = "merge",
+    list_merge: ListMergeOptions = None, #"merge",
 ) -> Any:
     """
     Recursively merge two data structures, new is mutated in-place.
@@ -72,6 +72,12 @@ def object_merge(
             new.remove("dynaconf_merge_unique")
             unique = True
 
+        # SH changed default merge behaviour for lists to False
+        # (by setting default value for parameter list_merge to None)
+        if "dynaconf_merge" in new:
+            new.remove("dynaconf_merge")
+            list_merge = "merge"
+                    
         if list_merge == "merge" or unique:
             for item in old[::-1]:
                 if unique and item in new:
