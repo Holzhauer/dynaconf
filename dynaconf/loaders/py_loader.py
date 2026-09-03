@@ -37,7 +37,12 @@ def load(
         return
 
     # setup SourceMetadata (for inspecting)
-    loader_identifier = SourceMetadata(identifier, mod.__name__, "global")
+    if isinstance(identifier, SourceMetadata):
+        loader_identifier = SourceMetadata(
+            identifier.loader, mod.__name__, identifier.env
+        )
+    else:
+        loader_identifier = SourceMetadata(identifier, mod.__name__, "global")
 
     load_from_python_object(
         obj, mod, settings_module, key, loader_identifier, validate=validate
@@ -47,18 +52,19 @@ def load(
 def load_from_python_object(
     obj, mod, settings_module, key=None, identifier=None, validate=False
 ):
+    config = obj.__core__.config
     file_merge = getattr(mod, "dynaconf_merge", empty)
     if file_merge is empty:
         file_merge = getattr(mod, "DYNACONF_MERGE", empty)
 
     for setting in dir(mod):
+        setting_value = getattr(mod, setting)
         # A setting var in a Python file should start with upper case
         # valid: A_value=1, ABC_value=3 A_BBB__default=1
         # invalid: a_value=1, MyValue=3
         # This is to avoid loading functions, classes and built-ins
         if setting.split("__")[0].isupper():
             if key is None or key == setting:
-                setting_value = getattr(mod, setting)
                 obj.set(
                     setting,
                     setting_value,
@@ -66,9 +72,16 @@ def load_from_python_object(
                     merge=file_merge,
                     validate=validate,
                 )
-
-    obj._loaded_py_modules.append(mod.__name__)
-    obj._loaded_files.append(mod.__file__)
+        # if setting (name) starts with _dynaconf_hook
+        # and the value is a callable
+        # then we want to add it to the post_hooks list on the obj
+        # we use the name instead checking on an attribute to avoid
+        # loading a lazy object early in the process
+        elif setting.startswith("_dynaconf_hook") and callable(setting_value):
+            if setting_value not in config.post_hooks:
+                config.post_hooks.append(setting_value)
+    config.loaded_py_modules.append(mod.__name__)
+    config.loaded_files.append(mod.__file__)
 
 
 def try_to_load_from_py_module_name(
@@ -88,7 +101,10 @@ def try_to_load_from_py_module_name(
     ctx = suppress(ImportError, TypeError) if silent else suppress()
 
     # setup SourceMetadata (for inspecting)
-    loader_identifier = SourceMetadata(identifier, name, "global")
+    if isinstance(identifier, SourceMetadata):
+        loader_identifier = identifier
+    else:
+        loader_identifier = SourceMetadata(identifier, name, "global")
 
     with ctx:
         mod = importlib.import_module(str(name))
@@ -145,7 +161,7 @@ def import_from_filename(obj, filename, silent=False):  # pragma: no cover
             exec(compile(config_file.read(), filename, "exec"), mod.__dict__)
     except OSError as e:
         e.strerror = (
-            f"py_loader: error loading file " f"({e.strerror} {filename})\n"
+            f"py_loader: error loading file ({e.strerror} {filename})\n"
         )
         if silent and e.errno in (errno.ENOENT, errno.EISDIR):
             return

@@ -81,6 +81,46 @@ settings = Dynaconf(post_hooks=hook_function)
 You can also set the merging individually for each settings variable as seen on
 [merging](merging.md) documentation.
 
+
+#### Decorator approach
+
+**new in 3.2.8**
+
+When the settings file is a Python file, you can also use a decorator to define hooks.
+
+```python
+from dynaconf import Dynaconf
+
+settings = Dynaconf(settings_file="settings.py")
+```
+
+```python title="settings.py"
+from dynaconf import post_hook
+
+VARIABLE = "value"
+# all regular settings here
+...
+
+@post_hook
+def set_debugging_database_url(settings):
+    data = {}
+    if settings.DEBUG:
+        data["DATABASE_URL"] = "sqlite://"
+    return data
+```
+
+Dynaconf will collect the decorated functions and execute them after the settings file is loaded.
+
+The hook decorator can only be applied to functions that are defined withing the same settings file, in the
+need to use external functions, wrap it in a local decorated function.
+
+When using `load_file` to load a python file, hooks will also be collected and immediately executed after the file is loaded, unless the `run_hooks` argument is set to `False`, this is useful when calling `load_file` multiple times and have the hooks to be all executed together at a certain point later.
+
+`execute_instance_hooks` helper method is also available to trigger execution of collected hooks, but usually not
+needed because a common pattern is to call the latest `load_file` with `run_hooks=True` to trigger all hooks at once.
+
+Notice that load_file will execute all collected hooks that have not been called yet, it does not execute hooks that have already been called (unless the hook itself is marked as `_called=False`). This is useful when you want to reload a file and re-execute hooks.
+
 ## Inspecting History
 
 > **NEW** in version 3.2.0
@@ -180,6 +220,44 @@ Kwargs-only:
 ### `get_history`
 
 Returns a list of history-records (the same as in the `history` key of `inspect_settings` records. In fact, `inspect_settings` uses `get_history`, so this is just available if your main goal is to use the data directly. It offer some basic filtering capabilities, but it is assumed that if you choose to use this you'll probably want to process and filter the data by your own.
+
+
+### `get_debug_info`
+
+Returns a dictionary containing debug information about the settings object. This information includes the current environment, the settings file, the loaders, and the history of the settings object.
+
+```python
+from dynaconf.utils.inspect_settings import get_debug_info
+get_debug_info(settings.DYNACONF, verbosity=0, key="data")
+# result
+{'core_loaders': [],
+ 'environments': ['development', 'production'],
+ 'history': [{'data': {}, 'identifier': 'init_kwargs', 'loader': 'set_method'},
+             {'data': {},
+              'identifier': 'default_settings',
+              'loader': 'set_method'},
+             {'data': {},
+              'identifier': 'envvars_first_load',
+              'loader': 'set_method'},
+             {'data': {},
+              'identifier': 'settings_module_method',
+              'loader': 'set_method'},
+             {'data': {'data': [0]},
+              'identifier': '/etc/app/defaults.py',
+              'loader': 'py'},
+             {'data': {'data': '@merge 7,8,9'},
+              'identifier': '/etc/app/settings.yaml',
+              'loader': 'yaml'},
+ 'loaded_envs': ["development"],
+ 'loaded_files': ['/etc/app/defaults.py',
+                  '/etc/app/settings.yaml'],
+ 'loaded_hooks': [],
+ 'post_hooks': [],
+ 'root_path': '/run/app',
+ 'validators': [],
+ 'versions': {'django': '4.2.16', 'dynaconf': '3.2.8.dev0'}}
+```
+
 
 ## Update dynaconf settings using command-line arguments (cli)
 
@@ -309,6 +387,15 @@ Notice that data loaded by this method is not persisted.
 Once `env` is changed via `setenv|using_env`, `reload` or `configure` invocation, its loaded data
 will be cleaned. To persist consider using `INCLUDES_FOR_DYNACONF` variable or assuring it will
 be loaded programmatically again.
+
+**new in 3.2.7**
+
+- Calls to `load_file` will be recorded on the inspect history and include module and line number.
+
+**new in 3.2.11**
+
+- load_file with `env=False` will load the file bypassing the environment, forcing the envless mode and loading the whole top level variables of the file.
+
 
 ## Prefix filtering
 
@@ -588,6 +675,15 @@ assert obj.VALUE == 42.1  # AttributeError
 
 ```
 
+**new in 3.2.7**
+- `populate_obj` will take `internals` boolean to enable or disable populating internal settings.
+
+
+**new in 3.2.8**
+
+- `populate_obj` will take `convert_to_dict` boolean to enable or disable converting the settings object to a dict before populating the object, this makes the data structures like Box and BoxList to be converted to the raw dict/list before populating the object.
+
+
 ## Exporting
 
 You can generate a file with current configs by calling `dynaconf list -o /path/to/file.ext` see more in [cli](cli.md)
@@ -600,7 +696,7 @@ from dynaconf import settings
 from dynaconf.utils.boxing import DynaBox
 
 # generates a dict with all the keys for `development` env
-data = settings.as_dict(env='development')
+data = settings.to_dict(env='development')
 
 # writes to a file, the format is inferred by extension
 # can be .yaml, .toml, .ini, .json, .py
@@ -627,7 +723,7 @@ settings = Dynaconf(
 
 ## Testing
 
-For testing it is recommended to just switch to `testing` environment and read the same config files.
+For testing it is recommended to just switch to the `testing` environment and read the same config files.
 
 `settings.toml`
 ```toml
@@ -649,15 +745,15 @@ print(settings.VALUE)
 ENV_FOR_DYNACONF=testing python program.py
 ```
 
-Then your `program.py` will print `"On Testing"` red from `[testing]` environment.
+Then your `program.py` will print `"On Testing"`, read from `[testing]` environment.
 
 
 ### Pytest
 
-For pytest it is common to create fixtures to provide pre-configured settings object or to configure the settings before
+For pytest it is common to create fixtures to provide pre-configured settings objects or to configure the settings before
 all the tests are collected.
 
-Examples available on [https://github.com/dynaconf/dynaconf/tree/master/tests_functional/pytest_example](https://github.com/dynaconf/dynaconf/tree/master/tests_functional/pytest_example)
+Examples are available [here](https://github.com/dynaconf/dynaconf/tree/master/tests_functional/legacy/pytest_example_app).
 
 With `pytest` fixtures it is recommended to use the `FORCE_ENV_FOR_DYNACONF` instead of just `ENV_FOR_DYNACONF` because it has precedence.
 
@@ -681,7 +777,7 @@ settings = Dynaconf(
 
 #### A python program
 
-`settings.toml` with the `[testing]` environment.
+`settings.toml` with the `[testing]` environment:
 
 ```toml
 [default]
@@ -691,7 +787,7 @@ VALUE = "On Default"
 VALUE = "On Testing"
 ```
 
-`app.py` that reads that value from current environment.
+`app.py` that reads that value from current environment:
 ```py
 from dynaconf import settings
 
@@ -700,7 +796,7 @@ def return_a_value():
     return settings.VALUE
 ```
 
-`tests/conftest.py` with a fixture to force `settings` to run pointing to `[testing]` environment.
+`tests/conftest.py` with a fixture to force `settings` to run pointing to `[testing]` environment:
 
 ```py
 import pytest
@@ -712,7 +808,7 @@ def set_test_settings():
     settings.configure(FORCE_ENV_FOR_DYNACONF="testing")
 ```
 
-`tests/test_dynaconf.py` to assert that the correct environment is loaded
+`tests/test_dynaconf.py` to assert that the correct environment is loaded:
 
 ```py
 from app import return_a_value
@@ -724,7 +820,7 @@ def test_dynaconf_is_in_testing_env():
 
 #### A Flask program
 
-`settings.toml` with the `[testing]` environment.
+`settings.toml` with the `[testing]` environment:
 
 ```toml
 [default]
@@ -734,7 +830,7 @@ VALUE = "On Default"
 VALUE = "On Testing"
 ```
 
-`src.py` that has a Flask application factory
+`src.py` that has a Flask application factory:
 
 ```py
 from flask import Flask
@@ -749,7 +845,7 @@ def create_app(**config):
 ```
 
 `tests/conftest.py` with a fixture to provide `app` dependency injection to all the tests,
-And force this `app` to point to `[testing]` config environment.
+and force this `app` to point to `[testing]` config environment:
 
 ```py
 import pytest
@@ -762,7 +858,7 @@ def app():
     return app
 ```
 
-`tests/test_flask_dynaconf.py` to assert that the correct environment is loaded
+`tests/test_flask_dynaconf.py` to assert that the correct environment is loaded:
 
 ```py
 def test_dynaconf_is_on_testing_env(app):
@@ -772,7 +868,7 @@ def test_dynaconf_is_on_testing_env(app):
 
 ### Mocking
 
-But it is common in unit tests to `mock` some objects and you may need in rare cases to mock the `dynaconf.settings` when running your tests.
+It is common in unit tests to `mock` some objects, and you may need in rare cases to mock the `dynaconf.settings` when running your tests:
 
 ```python
 from dynaconf.utils import DynaconfDict

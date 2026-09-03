@@ -204,6 +204,10 @@ export MY_SETTINGS_PATH="path.to.settings"
 The prefix used by dynaconf to load values from environment variables. You might want your users
 to export values using your app name, ex: `export MYPROGRAM_DEBUG=true`
 
+**new in 3.2.7**
+
+- The prefix  can be a comma separated list of prefixes, ex: `export MYPROGRAM_DEBUG=true` and `export MYAPP_DEBUG=true` will be loaded as `settings.DEBUG` if `ENVVAR_PREFIX_FOR_DYNACONF=MYPROGRAM,MYAPP`
+
 ---
 
 ### **env**
@@ -219,6 +223,11 @@ export ENV_FOR_DYNACONF=production
 ```
 
 Or per execution: `ENV_FOR_DYNACONF=production program.py`
+
+
+**new in 3.2.7**
+
+- The `env` can be a comma separated list of envs, ex: `export ENV_FOR_DYNACONF=production,staging` will activate both `production` and `staging` environments, and variables from both layers will be loaded in the order they are defined.
 
 ---
 
@@ -375,13 +384,13 @@ Otherwise it will be only what is specified in the latest loaded file. read more
 
 One of the [merging strategies](merging.md) is the use of `__` to access nested level data structures. By default the separator is `__` (double underline), this variable allows you to change that.
 
-ex:
+Example:
 
 ```bash
 export DYNACONF_DATABASES__default__ENGINE__Address="0.0.0.0"
 ```
 
-generates:
+Is equivalent to:
 
 ```python
 DATABASES = {
@@ -393,26 +402,35 @@ DATABASES = {
 }
 ```
 
-To access list by indexing
+!!! warning
+    Choose something that is suitable for env vars, usually you don't need to change this variable.
 
-> type=`str`, default=`"___"` (triple underescore) </br>
+!!! Warning
+    On windows env vars are all transformed to upper case.
+
+### **index_separator**
+
+> type=`str | None`, default=`None` </br>
 > env-var=`INDEX_SEPARATOR_FOR_DYNACONF`
 
-ex:
+> New in **3.3.0 (experimental)**
+
+Similar to [nested_separator](#nested_separators), but for dismbiguation of index keys.
+Disabled when it's value is `None`, which is the default.
+
+Example:
 
 ```bash
+export INDEX_SEPARATOR_FOR_DYNACONF="___"
 export DYNACONF_DATABASES__default__WORKERS___0__Address="1.1.1.1"
 export DYNACONF_DATABASES__default__WORKERS___1__Address="2.2.2.2"
 ```
 
-generates:
+Is equivalent to:
 
 ```python
 DATABASES = {
     "default": {
-        "ENGINE": {
-            "Address": "0.0.0.0"
-        },
         "WORKERS": [
             {"Address": "1.1.1.1"},
             {"Address": "2.2.2.2"} 
@@ -420,12 +438,6 @@ DATABASES = {
     }
 }
 ```
-
-!!! warning
-    Choose something that is suitable for env vars, usually you don't need to change this variable.
-
-!!! Warning
-    On windows env vars are all transformed to upper case.
 
 ---
 

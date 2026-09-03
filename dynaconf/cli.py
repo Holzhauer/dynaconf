@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import inspect as python_inspect
 import json
 import os
 import pprint
@@ -17,6 +18,7 @@ from dynaconf import default_settings
 from dynaconf import LazySettings
 from dynaconf import loaders
 from dynaconf import settings as legacy_settings
+from dynaconf.base import Settings
 from dynaconf.loaders.py_loader import get_module
 from dynaconf.utils import prepare_json
 from dynaconf.utils import upperfy
@@ -27,6 +29,7 @@ from dynaconf.utils.inspect import EnvNotFoundError
 from dynaconf.utils.inspect import inspect_settings
 from dynaconf.utils.inspect import KeyNotFoundError
 from dynaconf.utils.inspect import OutputFormatError
+from dynaconf.utils.inspect import print_debug_info
 from dynaconf.utils.parse_conf import parse_conf_data
 from dynaconf.utils.parse_conf import unparse_conf_data
 from dynaconf.validator import ValidationError
@@ -56,7 +59,14 @@ def set_settings(ctx, instance=None):
 
     settings = None
 
-    _echo_enabled = ctx.invoked_subcommand not in ["get", "inspect", None]
+    _echo_enabled = ctx.invoked_subcommand not in [
+        "get",
+        "inspect",
+        "debug-info",
+        None,
+    ]
+    if "--json" in sys.argv:
+        _echo_enabled = False
 
     if instance is not None:
         if ctx.invoked_subcommand in ["init"]:
@@ -81,20 +91,18 @@ def set_settings(ctx, instance=None):
                 )
     elif "DJANGO_SETTINGS_MODULE" in os.environ:  # pragma: no cover
         sys.path.insert(0, os.path.abspath(os.getcwd()))
-        try:
-            # Django extension v2
-            from django.conf import settings  # noqa
-            import dynaconf  # noqa: F401
-            import django
+        import django  # noqa
 
-            # see https://docs.djangoproject.com/en/4.2/ref/applications/
-            # at #troubleshooting
-            django.setup()
-
-            settings.DYNACONF.configure()
-        except AttributeError:
-            settings = LazySettings()
-
+        django.setup()  # ensure django is setup to avoid AppRegistryNotReady
+        settings_module = import__django_settings(
+            os.environ["DJANGO_SETTINGS_MODULE"]
+        )
+        found_settings = python_inspect.getmembers(
+            settings_module,
+            lambda item: isinstance(item, (LazySettings, Settings)),
+        )
+        if found_settings:
+            settings = found_settings[0][1]
         if settings is not None and _echo_enabled:
             click.echo(
                 click.style(
@@ -103,7 +111,7 @@ def set_settings(ctx, instance=None):
             )
 
     if settings is None:
-        if instance is None and "--help" not in click.get_os_args():
+        if instance is None and "--help" not in sys.argv:
             if ctx.invoked_subcommand and ctx.invoked_subcommand not in [
                 "init",
             ]:
@@ -117,6 +125,18 @@ def set_settings(ctx, instance=None):
                 settings = LazySettings(create_new_settings=True)
         else:
             settings = LazySettings()
+
+
+def import__django_settings(django_settings_module):
+    """Import the Django settings module from the string importable path."""
+    try:
+        with redirect_stdout(None):
+            module = importlib.import_module(django_settings_module)
+    except ImportError as e:
+        raise click.UsageError(e)
+    except FileNotFoundError:
+        return
+    return module
 
 
 def import_settings(dotted_path):
@@ -300,7 +320,7 @@ def init(ctx, fileformat, path, env, _vars, _secrets, wg, y, django):
             "app = Flask(__name__)\n"
             "FlaskDynaconf(app)\n"
         )
-        exit(1)
+        sys.exit(1)
 
     path = Path(path)
 
@@ -366,9 +386,9 @@ def init(ctx, fileformat, path, env, _vars, _secrets, wg, y, django):
         gitignore_path = path.parent / ".gitignore"
     else:
         if fileformat == "env":
-            if str(path) in (".env", "./.env"):  # pragma: no cover
-                settings_path = path
-            elif str(path).endswith("/.env"):  # pragma: no cover
+            if str(path) in (".env", "./.env") or str(path).endswith(
+                "/.env"
+            ):  # pragma: no cover
                 settings_path = path
             elif str(path).endswith(".env"):  # pragma: no cover
                 settings_path = path.parent / ".env"
@@ -488,7 +508,7 @@ def get(key, default, env, unparse):
         result = unparse_conf_data(result)
 
     if isinstance(result, (dict, list, tuple)):
-        result = json.dumps(prepare_json(result), sort_keys=True)
+        result = json.dumps(prepare_json(result), sort_keys=True, default=repr)
 
     click.echo(result, nl=False)
 
@@ -586,8 +606,8 @@ def _list(
         data = settings.as_dict(env=env, internal=_all)
     else:
         identifier = f"{loader}_{cur_env}"
-        data = settings._loaded_by_loaders.get(identifier, {})
-        data = data or settings._loaded_by_loaders.get(loader, {})
+        data = settings.loaded_by_loaders.get(identifier, {})
+        data = data or settings.loaded_by_loaders.get(loader, {})
 
     # remove to avoid displaying twice
     data.pop("SETTINGS_MODULE", None)
@@ -616,7 +636,9 @@ def _list(
         if output:
             loaders.write(output, prepare_json(data), env=not flat and cur_env)
         if _json:
-            json_data = json.dumps(prepare_json(data), sort_keys=True)
+            json_data = json.dumps(
+                prepare_json(data), sort_keys=True, default=repr
+            )
             click.echo(json_data, nl=False)
     else:
         key = upperfy(key)
@@ -628,7 +650,7 @@ def _list(
 
         if value is empty:
             click.secho("Key not found", bg="red", fg="white", err=True)
-            return
+            sys.exit(1)
 
         if not _json:
             click.echo(format_setting(key, value))
@@ -637,7 +659,9 @@ def _list(
                 output, prepare_json({key: value}), env=not flat and cur_env
             )
         if _json:
-            click.echo(json.dumps(prepare_json({key: value})), nl=True)
+            click.echo(
+                json.dumps(prepare_json({key: value}), default=repr), nl=True
+            )
 
     if env:
         settings.setenv()
@@ -700,9 +724,9 @@ def write(to, _vars, _secrets, path, env, y):
             secrets_path = path.parent / f".secrets.{to}"
         else:
             if to == "env":
-                if str(path) in (".env", "./.env"):  # pragma: no cover
-                    settings_path = path
-                elif str(path).endswith("/.env"):
+                if str(path) in (".env", "./.env") or str(path).endswith(
+                    "/.env"
+                ):  # pragma: no cover
                     settings_path = path
                 elif str(path).endswith(".env"):
                     settings_path = path.parent / ".env"
@@ -796,9 +820,9 @@ def validate(path):  # pragma: no cover
         )
         sys.exit(1)
 
-    # guarantee there is an environment
     validation_data = {k.lower(): v for k, v in validation_data.items()}
-    if not validation_data.get("default"):
+    if not settings.ENVIRONMENTS_FOR_DYNACONF:
+        # flat file: top-level keys are field names, not environments
         validation_data = {"default": validation_data}
 
     success = True
@@ -843,7 +867,10 @@ INSPECT_FORMATS = list(builtin_dumpers.keys())
 @main.command()
 @click.option("--key", "-k", help="Filters result by key.")
 @click.option(
-    "--env", "-e", help="Filters result by environment.", default=None
+    "--env",
+    "-e",
+    help="Filters result by environment on --report-mode=inspect.",
+    default=None,
 )
 @click.option(
     "--format",
@@ -856,7 +883,7 @@ INSPECT_FORMATS = list(builtin_dumpers.keys())
     "--old-first",
     "new_first",
     "-s",
-    help="Invert history sorting to 'old-first'",
+    help="Invert history sorting to 'old-first' on --report-mode=inspect.",
     default=True,
     is_flag=True,
 )
@@ -866,7 +893,7 @@ INSPECT_FORMATS = list(builtin_dumpers.keys())
     "-n",
     default=None,
     type=int,
-    help="Limits how many history entries are shown.",
+    help="Limits how many history entries are shown on --report-mode=inspect.",
 )
 @click.option(
     "--all",
@@ -876,28 +903,54 @@ INSPECT_FORMATS = list(builtin_dumpers.keys())
     is_flag=True,
     help="Show dynaconf internal settings?",
 )
+@click.option(
+    "--report-mode",
+    "report_mode",
+    "-m",
+    default="inspect",
+    type=click.Choice(["inspect", "debug"]),
+)
+@click.option(
+    "-v",
+    "--verbose",
+    count=True,
+    help="Increase verbosity of the output on --report-mode=debug.",
+)
 def inspect(
-    key, env, format, new_first, history_limit, _all
+    key, env, format, new_first, history_limit, _all, report_mode, verbose
 ):  # pragma: no cover
     """
     Inspect the loading history of the given settings instance.
 
     Filters by key and environment, otherwise shows all.
     """
-    try:
-        inspect_settings(
+
+    if report_mode == "debug":
+        print_debug_info(
             settings,
-            key=key,
-            env=env or None,
             dumper=format,
-            new_first=new_first,
-            include_internal=_all,
-            history_limit=history_limit,
-            print_report=True,
+            verbosity=verbose,
+            key=key,
         )
         click.echo()
-    except (KeyNotFoundError, EnvNotFoundError, OutputFormatError) as err:
-        click.echo(err)
+    elif report_mode == "inspect":
+        try:
+            inspect_settings(
+                settings,
+                key=key,
+                env=env or None,
+                dumper=format,
+                new_first=new_first,
+                include_internal=_all,
+                history_limit=history_limit,
+                print_report=True,
+            )
+            click.echo()
+        except (KeyNotFoundError, EnvNotFoundError, OutputFormatError) as err:
+            click.echo(err)
+            sys.exit(1)
+    else:
+        click.echo("Invalid report mode")
         sys.exit(1)
 
 

@@ -1,5 +1,4 @@
 import os
-import sys
 from typing import Annotated
 from typing import Optional
 from typing import Union
@@ -14,6 +13,8 @@ from dynaconf.typed import NotRequired
 from dynaconf.typed import Options
 from dynaconf.typed import ValidationError
 from dynaconf.typed import Validator
+
+pytestmark = pytest.mark.usefixtures("no_deprecations")
 
 
 def test_immediate_validation():
@@ -100,7 +101,7 @@ def test_annotated_with_dictvalue():
         # This is not allowed, should add validators on the dictvalue type itself
         plug: Annotated[Plugin, Validator(contains="name")]
 
-    msg = "plug.name must is_type_of.+Union\[str, int]"
+    msg = r"plug.name must is_type_of.+(Union\[str, int]|str \| int)"
     with pytest.raises(ValidationError, match=msg):
         Settings(plug={"name": 4.2})
 
@@ -143,7 +144,6 @@ def test_union_type_validates(monkeypatch):
             Settings()
 
 
-@pytest.mark.skipif(sys.version_info < (3, 10), reason="not supported on 3.9")
 def test_new_union_validates(monkeypatch):
     class Settings(Dynaconf):
         number: int | float | bool
@@ -161,7 +161,7 @@ def test_union_enclosed_type_validates_type(monkeypatch):
 
     with monkeypatch.context() as m:
         m.setenv("DYNACONF_NUMBERS", '["banana"]')
-        msg = "numbers must is_type_of list\[typing.Union\[int, float, bool]]"
+        msg = r"numbers must is_type_of list\[(typing\.Union\[int, float, bool]|int \| float \| bool)]"
         with pytest.raises(ValidationError, match=msg):
             Settings()
 
@@ -352,7 +352,7 @@ def test_sub_types_works(monkeypatch):
         # and raise validation
         m.setenv("MYTYPEDAPP_database__extra__plugins___0__batata", "1")
 
-        settings = Settings()
+        settings = Settings(INDEX_SEPARATOR_FOR_DYNACONF="___")
         assert settings.database.port == 5000
         assert settings.database.host == "server.com"
         assert settings.database.engine == "postgres"
@@ -826,7 +826,7 @@ def test_notrequired():
         Settings(person={"name": "Bruno", "age": "too-old"})
 
     with pytest.raises(
-        ValidationError, match="person.team must is_in \['A', 'B']"
+        ValidationError, match=r"person.team must is_in \['A', 'B']"
     ):
         Settings(person={"name": "Bruno", "team": "C"})
 
@@ -976,7 +976,6 @@ def test_list_enclosed_type_annotated_with_union():
         Settings(colors=[])
 
 
-@pytest.mark.skipif(sys.version_info < (3, 10), reason="not supported on 3.9")
 def test_list_enclosed_type_annotated_with_new_union():
     # Annotated and Unionized
     class Settings(Dynaconf):
@@ -1066,7 +1065,7 @@ def test_list_enclosed_type_annotated_notrequired():
     Settings()
     with pytest.raises(
         ValidationError,
-        match="colors must is_type_of.+list\[str]",
+        match=r"colors must is_type_of.+list\[str]",
     ):
         Settings(colors=[1, 2, 3])
     with pytest.raises(
@@ -1084,7 +1083,7 @@ def test_list_enclosed_type_notrequired():
     Settings()
     with pytest.raises(
         ValidationError,
-        match="colors must is_type_of.+list\[str]",
+        match=r"colors must is_type_of.+list\[str]",
     ):
         Settings(colors=[1, 2, 3])
 
@@ -1117,7 +1116,7 @@ def test_list_enclosed_type_with_optional():
 
     with pytest.raises(
         ValidationError,
-        match="colors must is_type_of.+Optional\[str]",
+        match=r"colors must is_type_of.+(Optional\[str]|str \| None)",
     ):
         Settings(colors=["red", "#123", 3])
 

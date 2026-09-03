@@ -4,6 +4,7 @@ Dynaconf provides a drop in replacement for `app.config`.
 
 As Flask encourages the composition by overriding the `config_class` attribute this extension follows the [patterns of Flask](https://flask.palletsprojects.com/en/2.3.x/patterns/subclassing/) and turns your Flask's `app.config` in to a `dynaconf` instance.
 
+
 ## Initialize the extension
 
 Initialize the **FlaskDynaconf** extension in your `app`
@@ -23,7 +24,7 @@ FlaskDynaconf(app)
 
 Dynaconf transform nested data structures to a new DynaBox instance, this is an
 object that allows dot notation access such as `app.config.key.value.other`.
-However this feature is imcompatible with some Flask extensions, for example:
+However this feature is incompatible with some Flask extensions, for example:
 `Flask-Alembic`.
 
 So in case you see a `BoxKeyError` when running your app with you can run it on

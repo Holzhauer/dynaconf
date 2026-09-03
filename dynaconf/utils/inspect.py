@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Callable
+from contextlib import suppress
 from functools import partial
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version
 from pathlib import PosixPath
 from typing import Any
-from typing import Callable
 from typing import Literal
 from typing import Protocol
 from typing import TextIO
@@ -15,9 +18,10 @@ from typing import TYPE_CHECKING
 from typing import Union
 
 from dynaconf.loaders.base import SourceMetadata
-from dynaconf.utils.boxing import DynaBox
+from dynaconf.nodes import DataDict
+from dynaconf.nodes import DataList
 from dynaconf.utils.functional import empty
-from dynaconf.vendor.box.box_list import BoxList
+from dynaconf.utils.parse_conf import Lazy
 from dynaconf.vendor.ruamel.yaml import YAML
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -27,11 +31,21 @@ if TYPE_CHECKING:  # pragma: no cover
 
 # Dumpers config
 
-json_pretty = partial(json.dump, indent=2)
-json_compact = json.dump
+json_pretty = partial(json.dump, indent=2, default=str)
+json_compact = partial(json.dump, default=str)
+
+
+def yaml_dumper_with_defaults(data: dict, text_stream: TextIO) -> None:
+    """Easier way to get YAML dumper to handle unseralizable types"""
+    yaml = YAML()
+    # let JSON handle unserializable types and then load it back
+    data = json.loads(json.dumps(data, default=str))
+    yaml.default_flow_style = False
+    yaml.dump(data, text_stream)
+
 
 builtin_dumpers = {
-    "yaml": YAML().dump,
+    "yaml": yaml_dumper_with_defaults,
     "json": json_pretty,
     "json-compact": json_compact,
 }
@@ -129,7 +143,7 @@ def inspect_settings(
     if env:
         settings = settings.from_env(env)
         registered_envs = {
-            src_meta.env for src_meta in settings._loaded_by_loaders.keys()
+            src_meta.env for src_meta in settings.loaded_by_loaders.keys()
         }
         if env.lower() not in registered_envs:
             raise EnvNotFoundError(f"The requested env is not valid: {env!r}")
@@ -246,7 +260,7 @@ def get_history(
 
     internal_identifiers = ["default_settings", "_root_path"]
     result = []
-    for source_metadata, data in obj._loaded_by_loaders.items():
+    for source_metadata, data in obj.loaded_by_loaders.items():
         # filter by source_metadata
         if filter_callable(source_metadata) is False:
             continue
@@ -283,10 +297,13 @@ def get_history(
         if key and not result:
             raise KeyNotFoundError(f"The requested key was not found: {key!r}")
 
+    if history_limit:
+        result = result[:history_limit]
+
     return result
 
 
-def _ensure_serializable(data: BoxList | DynaBox) -> dict | list:
+def _ensure_serializable(data: DataList | DataDict) -> dict | list:
     """
     Converts box dict or list types to regular python dict or list
     Bypasses other values.
@@ -295,9 +312,9 @@ def _ensure_serializable(data: BoxList | DynaBox) -> dict | list:
         "bar": {"a": "A", "b": [1,2,3]},
     }
     """
-    if isinstance(data, (BoxList, list)):
+    if isinstance(data, (DataList, list)):
         return [_ensure_serializable(v) for v in data]
-    elif isinstance(data, (DynaBox, dict)):
+    elif isinstance(data, (DataDict, dict)):
         return {
             k: _ensure_serializable(v)
             for k, v in data.items()  # type: ignore
@@ -311,29 +328,164 @@ def _get_data_by_key(
     key_dotted_path: str,
     default: Any = None,
     sep="__",
-):
+) -> Any:
     """
     Returns value found in data[key] using dot-path str (e.g, "path.to.key").
     Raises KeyError if not found
     """
-    if not isinstance(data, DynaBox):
-        data = DynaBox(data)  # DynaBox can handle insensitive keys
+    if not isinstance(data, DataDict):
+        data = DataDict(data)  # DataDict can handle insensitive keys
 
     if sep in key_dotted_path:
         key_dotted_path = key_dotted_path.replace(sep, ".")
+
+    def handle_repr(value):
+        # lazy values shouldnt be evaluated for inspecting
+        if isinstance(value, Lazy):
+            return value._dynaconf_encode()
+        return value
 
     def traverse_data(data, path):
         # transform `a.b.c` in successive calls to `data['a']['b']['c']`
         path = path.split(".")
         root_key, nested_keys = path[0], path[1:]
-        result = data[root_key]
+        result = data.get(root_key, bypass_eval=True)
         for key in nested_keys:
-            result = result[key]
+            result = handle_repr(result.get(key, bypass_eval=True))
         return result
 
     try:
         return traverse_data(data, key_dotted_path)
-    except KeyError:
+    except (KeyError, AttributeError):
         if not default:
             raise KeyError(f"Path not found in data: {key_dotted_path!r}")
         return default
+
+
+def get_debug_info(
+    settings: Settings | LazySettings,
+    verbosity: int = 0,
+    key: str | None = None,
+) -> dict:
+    """Returns a dict with debug info about the settings object"""
+    config = settings.__core__.config
+
+    if key:
+        verbosity = 2
+
+    def filter_by_key(data: dict) -> dict:
+        """If key is not None, filter dict keeping only the key"""
+        if key and data:
+            try:
+                return {key: _get_data_by_key(data, key)}
+            except KeyError:
+                return {}
+        return data
+
+    def build_loading_history() -> list[dict]:
+        _data = []
+        for (
+            source_metadata,
+            source_data,
+        ) in settings.loaded_by_loaders.items():
+            _real_data = filter_by_key(source_data)
+            if verbosity == 0:
+                _data.append(
+                    {
+                        "loader": source_metadata.loader,
+                        "identifier": source_metadata.identifier,
+                        "data": len(_real_data),
+                    }
+                )
+            elif verbosity == 1:
+                _data.append(
+                    {
+                        "loader": source_metadata.loader,
+                        "identifier": source_metadata.identifier,
+                        "data": list(_real_data.keys()),
+                    }
+                )
+            else:
+                _data.append(
+                    {
+                        "loader": source_metadata.loader,
+                        "identifier": source_metadata.identifier,
+                        "data": _real_data,
+                    }
+                )
+        return _data
+
+    def build_loaded_hooks():
+        _data = []
+        for hook, hook_data in config.loaded_hooks.items():
+            _real_data = filter_by_key(hook_data.get("post", {})) or {}
+            if verbosity == 0:
+                _data.append(
+                    {
+                        "hook": str(hook),
+                        "data": len(_real_data),
+                    }
+                )
+            elif verbosity == 1:
+                _data.append(
+                    {
+                        "hook": str(hook),
+                        "data": list(_real_data.keys()),
+                    }
+                )
+            else:
+                _data.append(
+                    {
+                        "hook": str(hook),
+                        "data": _real_data,
+                    }
+                )
+        return _data
+
+    data = {
+        "versions": {
+            "dynaconf": version("dynaconf"),
+        },
+        "root_path": settings._root_path,
+        "validators": [str(v) for v in settings.validators],
+        "core_loaders": config.loaders,
+        "loaded_files": config.loaded_files,
+        "history": build_loading_history(),
+        "post_hooks": [str(h) for h in config.post_hooks],
+        "loaded_hooks": build_loaded_hooks(),
+    }
+    for name in ["django", "flask", "fastapi", "starlette"]:
+        with suppress(PackageNotFoundError):
+            data["versions"][name] = version(name)
+
+    if settings.get("ENVIRONMENTS_FOR_DYNACONF"):
+        environments = settings.get("ENVIRONMENTS_FOR_DYNACONF")
+        if isinstance(environments, (list, tuple)):
+            data["environments"] = list(environments)
+        else:
+            data["environments"] = environments
+        data["loaded_envs"] = settings.loaded_envs
+
+    if key:
+        data["current"] = {key: settings.get(key)}
+    return data
+
+
+def print_debug_info(
+    settings: Settings | LazySettings,
+    *,
+    dumper: DumperPreset | DumperType | None = None,
+    verbosity: int = 0,
+    key: str | None = None,
+):
+    """Calls dumper with settings debug info"""
+    dumper = dumper or "yaml"
+    if isinstance(dumper, str):
+        dumper = builtin_dumpers.get(dumper)
+        if dumper is None:
+            raise OutputFormatError(
+                f"The desired format is not available: {dumper!r}"
+            )
+
+    data = get_debug_info(settings, verbosity, key)
+    dumper(data, sys.stdout)

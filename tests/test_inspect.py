@@ -14,11 +14,14 @@ from dynaconf import Dynaconf
 from dynaconf.utils.inspect import _ensure_serializable
 from dynaconf.utils.inspect import _get_data_by_key
 from dynaconf.utils.inspect import EnvNotFoundError
+from dynaconf.utils.inspect import get_debug_info
 from dynaconf.utils.inspect import get_history
 from dynaconf.utils.inspect import inspect_settings
 from dynaconf.utils.inspect import KeyNotFoundError
 from dynaconf.utils.inspect import OutputFormatError
 from dynaconf.validator import Validator
+
+pytestmark = pytest.mark.usefixtures("no_deprecations")
 
 
 def create_file(filename: str, data: str) -> str:
@@ -60,13 +63,13 @@ def test_ensure_serializable():
     )
     normal_list = _ensure_serializable(settings.listy)
     normal_dict = _ensure_serializable(settings.dicty)
-    assert normal_list.__class__ == list
-    assert normal_list[3].__class__ == dict
-    assert normal_list[3]["b"].__class__ == list
+    assert normal_list.__class__ is list
+    assert normal_list[3].__class__ is dict
+    assert normal_list[3]["b"].__class__ is list
 
-    assert normal_dict.__class__ == dict
-    assert normal_dict["b"].__class__ == list  # type: ignore
-    assert normal_dict["b"][3].__class__ == dict  # type: ignore
+    assert normal_dict.__class__ is dict
+    assert normal_dict["b"].__class__ is list  # type: ignore
+    assert normal_dict["b"][3].__class__ is dict  # type: ignore
 
 
 def test_get_data_by_key():
@@ -85,7 +88,7 @@ def test_get_history_general(tmp_path):
     Should return
         - list of length 2
         - per-file metadata containing: loader, identifier, env and value.
-        - correct types: dicts and lists, not DynaBox and BoxList
+        - correct types: dicts and lists, not DataDict and DataList
     """
     file_a = tmp_path / "a.yml"
     file_b = tmp_path / "b.yml"
@@ -167,8 +170,8 @@ def test_get_history_general(tmp_path):
     ]
 
     # types has been normalized
-    assert history[2]["value"]["DICTY"].__class__ == dict
-    assert history[3]["value"]["LISTY"].__class__ == list
+    assert history[2]["value"]["DICTY"].__class__ is dict
+    assert history[3]["value"]["LISTY"].__class__ is list
 
 
 def test_get_history_env_false__file_plus_envvar(tmp_path):
@@ -198,11 +201,41 @@ def test_get_history_env_false__file_plus_envvar(tmp_path):
         history[3],
         {
             "loader": "env_global",
-            "identifier": "unique",
+            "identifier": "DYNACONF",
             "env": "global",
             "merged": False,
         },
     )
+
+
+def test_get_history_history_limit(tmp_path):
+    """
+    Given a history longer than history_limit
+    Should return only the first history_limit entries
+    """
+    file_a = tmp_path / "a.yml"
+    create_file(file_a, "foo: from_file")
+    settings = Dynaconf(settings_file=file_a, environments=False)
+
+    full = get_history(settings)
+    assert len(full) > 1
+
+    limited = get_history(settings, history_limit=1)
+    assert len(limited) == 1
+    assert limited == full[:1]
+
+
+def test_get_history_history_limit_larger_than_history(tmp_path):
+    """
+    Given a history_limit larger than the history
+    Should return the whole history unchanged
+    """
+    file_a = tmp_path / "a.yml"
+    create_file(file_a, "foo: from_file")
+    settings = Dynaconf(settings_file=file_a, environments=False)
+
+    full = get_history(settings)
+    assert get_history(settings, history_limit=len(full) + 10) == full
 
 
 def test_get_history_env_false__val_default_plus_envvar():
@@ -223,7 +256,7 @@ def test_get_history_env_false__val_default_plus_envvar():
         history[0],
         {
             "loader": "env_global",
-            "identifier": "unique",
+            "identifier": "DYNACONF",
             "env": "global",
             "merged": False,
         },
@@ -282,7 +315,7 @@ def test_get_history_env_false__merge_marks(tmp_path):
         history[5],
         {
             "loader": "env_global",
-            "identifier": "unique",
+            "identifier": "DYNACONF",
             "env": "global",
             "merged": True,
         },
@@ -326,7 +359,7 @@ def test_get_history_env_true__file_plus_envvar(tmp_path):
     }
     assert history[4] == {
         "loader": "env_global",
-        "identifier": "unique",
+        "identifier": "DYNACONF",
         "env": "global",
         "merged": False,
         "value": {"FOO": "from_environ"},
@@ -358,7 +391,7 @@ def test_get_history_env_true__val_default_plus_file(tmp_path):
     )
     history = get_history(settings)
 
-    assert len(history) == 7
+    assert len(history) == 8
     assert history[2] == {
         "loader": "toml",
         "identifier": str(file_a),
@@ -382,7 +415,8 @@ def test_get_history_env_true__val_default_plus_file(tmp_path):
     }
     # REVIEW: history[5] is not correct, validation default on other env should
     # not have side effect on current object but only on its copy/clone
-    assert history[6] == {
+    # history[6] == switching to production env, so it sets ENV_FOR_DYNACONF
+    assert history[7] == {
         "loader": "setdefault",
         "identifier": "unique",
         "env": "production",
@@ -434,7 +468,7 @@ def test_get_history_env_true__merge_marks(tmp_path):
         history[5],
         {
             "loader": "env_global",
-            "identifier": "unique",
+            "identifier": "DYNACONF",
             "env": "global",
             "merged": True,
         },
@@ -559,6 +593,37 @@ def test_get_history_env_and_key_filter(tmp_path):
     assert history[1]["value"] == "from_prod_b"
 
 
+def tests_get_history_with_variable_interpolation():
+    """Variable interpolation is not evaluated.
+    https://github.com/dynaconf/dynaconf/issues/1180
+
+    The original issue was about an exception being raised when there was
+    variable interpolation involved. But in the end, the get_history shouldnt
+    evaluate the interpolations:
+
+    - History should accurately inform the order and content of what the user loaded.
+    - For a key with a interpolation value, the accurate representation is not the evaluated
+      value, but the original template string.
+    - The evaluated depends on other keys, so for
+      history inspecting it is more reliable to show what variables were used so the user
+      can verify if everything happened as expected.
+    """
+    data = {
+        "a": {
+            "b": "foo",
+            "c": "bar",
+            "d": "@format {this.a.b} {this.a.c}",
+        }
+    }
+
+    settings = Dynaconf(**data)
+
+    assert settings.a.d == "foo bar"
+    history = get_history(settings, "a.d")
+    # shows the not-evaluated (raw) value
+    assert history[0]["value"] == "@format {this.a.b} {this.a.c}"
+
+
 def test_caveat__get_history_env_true(tmp_path):
     """
     Given environments=True and sources=file
@@ -672,7 +737,7 @@ def test_inspect_key_filter(tmp_path):
     assert result["history"] == [
         {
             "loader": "env_global",
-            "identifier": "unique",
+            "identifier": "DYNACONF",
             "env": "global",
             "merged": False,
             "value": "from_environ",
@@ -702,7 +767,7 @@ def test_inspect_no_filter(tmp_path):
     assert result["history"][:2] == [
         {
             "env": "global",
-            "identifier": "unique",
+            "identifier": "DYNACONF",
             "loader": "env_global",
             "merged": False,
             "value": {"BAR": "environ_only", "FOO": "from_environ"},
@@ -771,7 +836,7 @@ def test_inspect_to_file(tmp_path):
           BAR: environ_only
         history:
         - loader: env_global
-          identifier: unique
+          identifier: DYNACONF
           env: global
           merged: false
           value:
@@ -821,3 +886,156 @@ def test_inspect_exception_invalid_format():
     settings = Dynaconf()
     with pytest.raises(OutputFormatError):
         inspect_settings(settings, dumper="invalid_format")
+
+
+def test_get_debug_info(tmp_path):
+    file_a = tmp_path / "a.yml"
+    file_b = tmp_path / "b.yml"
+    file_c = tmp_path / "c.py"
+    create_file(
+        file_a,
+        """\
+        dicty:
+          a: A
+          b:
+            - 1
+            - c: C
+              d: D
+        """,
+    )
+    create_file(
+        file_b,
+        """\
+        listy:
+          - 1
+          - a: A
+            b: B
+            c:
+              - 1
+              - 2
+        """,
+    )
+    create_file(
+        file_c,
+        """\
+        from dynaconf import post_hook
+
+        FRUIT = "tomato"
+
+        @post_hook
+        def set_name_to_foo2(settings):
+            return {"name": "foo2"}
+        """,
+    )
+
+    def set_name_to_foo(settings):
+        return {"name": "foo"}
+
+    settings = Dynaconf(
+        settings_file=[file_a, file_b],
+        post_hooks=[
+            set_name_to_foo,
+            lambda settings: {"bar": "baz"},
+        ],
+        hello="world",
+        validators=[Validator("name", required=True)],
+    )
+
+    settings.load_file(file_c)
+
+    debug_info = get_debug_info(settings)
+    assert "dynaconf" in debug_info["versions"]
+    assert debug_info["root_path"] == str(tmp_path)
+    assert len(debug_info["validators"]) == 1
+    assert len(debug_info["post_hooks"]) == 3
+    assert len(debug_info["loaded_hooks"]) == 3
+    assert len(debug_info["loaded_files"]) == 3
+    assert len(debug_info["history"]) == 11
+
+    # Now including keys
+    debug_info = get_debug_info(settings, verbosity=1)
+    assert debug_info["history"][0]["data"] == [
+        "POST_HOOKS",
+        "HELLO",
+        "SETTINGS_FILE_FOR_DYNACONF",
+    ]
+    assert debug_info["history"][0]["identifier"] == "init_kwargs"
+    assert len(debug_info["history"][1]["data"]) > 1
+    assert debug_info["history"][1]["identifier"] == "default_settings"
+    assert debug_info["history"][2]["data"] == ["SETTINGS_MODULE"]
+    assert debug_info["history"][2]["identifier"] == "settings_module_method"
+    assert debug_info["history"][3]["data"] == ["DICTY"]
+    assert debug_info["history"][3]["identifier"] == str(file_a)
+    assert debug_info["history"][4]["data"] == ["LISTY"]
+    assert debug_info["history"][4]["identifier"] == str(file_b)
+    assert debug_info["history"][5]["data"] == ["NAME"]
+    assert debug_info["history"][5]["identifier"] == "set_name_to_foo@instance"
+    assert debug_info["history"][6]["data"] == ["BAR"]
+    assert "lambda_" in debug_info["history"][6]["identifier"]
+    assert debug_info["history"][9]["data"] == ["FRUIT"]
+
+    c_identifier = str(file_c).rstrip(".py")
+
+    assert debug_info["history"][9]["identifier"] == c_identifier
+    assert debug_info["history"][10]["data"] == ["NAME"]
+    assert (
+        debug_info["history"][10]["identifier"]
+        == f"set_name_to_foo2@{c_identifier}"
+    )
+    assert debug_info["loaded_files"] == [
+        str(file_a),
+        str(file_b),
+        str(file_c),
+    ]
+    assert debug_info["loaded_hooks"][0]["data"] == ["name"]
+    assert debug_info["loaded_hooks"][0]["hook"] == "set_name_to_foo@instance"
+    assert debug_info["loaded_hooks"][1]["data"] == ["bar"]
+    assert "lambda_" in debug_info["loaded_hooks"][1]["hook"]
+    assert debug_info["loaded_hooks"][2]["data"] == ["name"]
+    assert (
+        debug_info["loaded_hooks"][2]["hook"]
+        == f"set_name_to_foo2@{c_identifier}"
+    )
+    assert "set_name_to_foo" in debug_info["post_hooks"][0]
+    assert "lambda" in debug_info["post_hooks"][1]
+    assert "set_name_to_foo2" in debug_info["post_hooks"][2]
+
+    # Now including keys and values
+    debug_info = get_debug_info(settings, verbosity=2)
+    assert debug_info["history"][0]["data"]["HELLO"] == "world"
+    assert debug_info["history"][3]["data"]["DICTY"] == {
+        "a": "A",
+        "b": [1, {"c": "C", "d": "D"}],
+    }
+    assert debug_info["history"][4]["data"]["LISTY"] == [
+        1,
+        {"a": "A", "b": "B", "c": [1, 2]},
+    ]
+    assert debug_info["history"][5]["data"]["NAME"] == "foo"
+    assert debug_info["history"][6]["data"]["BAR"] == "baz"
+    assert debug_info["history"][9]["data"]["FRUIT"] == "tomato"
+    assert debug_info["history"][10]["data"]["NAME"] == "foo2"
+    assert debug_info["loaded_hooks"][0]["data"]["name"] == "foo"
+    assert debug_info["loaded_hooks"][1]["data"]["bar"] == "baz"
+    assert debug_info["loaded_hooks"][2]["data"]["name"] == "foo2"
+
+    # Now passing a specific key
+    debug_info = get_debug_info(settings, key="DICTY")
+    # assert the passed key is present on its own entry
+    # assert other keys are not present
+    assert debug_info["history"][0]["data"] == {}
+    assert debug_info["history"][1]["data"] == {}
+    assert debug_info["history"][2]["data"] == {}
+    assert debug_info["history"][3]["data"]["DICTY"] == {
+        "a": "A",
+        "b": [1, {"c": "C", "d": "D"}],
+    }
+    assert debug_info["history"][4]["data"] == {}
+    assert debug_info["history"][5]["data"] == {}
+    assert debug_info["history"][6]["data"] == {}
+    assert debug_info["history"][7]["data"] == {}
+    assert debug_info["history"][8]["data"] == {}
+    assert debug_info["history"][9]["data"] == {}
+    assert debug_info["history"][10]["data"] == {}
+    assert debug_info["loaded_hooks"][0]["data"] == {}
+    assert debug_info["loaded_hooks"][1]["data"] == {}

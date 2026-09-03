@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable
 from collections.abc import Sequence
 from contextlib import suppress
 from copy import deepcopy
 from itertools import chain
 from types import MappingProxyType
 from typing import Any
-from typing import Callable
 from typing import get_args
 from typing import TYPE_CHECKING
 
 from dynaconf import validator_conditions
 from dynaconf.utils import ensure_a_list
 from dynaconf.utils.functional import empty
+from dynaconf.utils.parse_conf import Lazy
 
 if TYPE_CHECKING:
     from dynaconf.base import LazySettings  # noqa: F401
@@ -88,9 +89,14 @@ class Validator:
         # When the very first thing to be performed when passed.
         # if no env is passed to `when` it is inherited
 
-    `must_exist` is alias to `required` requirement. (executed after when)::
+    `must_exist` controls existence checking (executed after when)::
 
-       settings.get(value, empty) returns non empty
+        must_exist=True  — variable must be present; raises if absent
+        must_exist=False — variable must be absent; raises if present
+        must_exist=None  — no existence rule (default); absent variables
+                           skip all further checks on that name
+
+    `required` is an alias for `must_exist`.
 
     condition is a callable to be executed and return boolean::
 
@@ -138,6 +144,22 @@ class Validator:
 
         if condition is not None and not callable(condition):
             raise TypeError("condition must be callable")
+
+        # in the case that:
+        # * default is a Lazy object AND
+        # * there isnt any validate operation to perform (that would require knowing the lazy value)
+        # Then we shouldnt trigger the Lazy evaluation
+        self.should_call_lazy = not all(
+            (
+                default,
+                isinstance(default, Lazy),
+                not must_exist,
+                not required,
+                not cast,
+                not items_validators,
+                not operations,
+            )
+        )
 
         self.names = names
         self.must_exist = must_exist if must_exist is not None else required
@@ -197,11 +219,11 @@ class Validator:
         return _repr
 
     @property
-    def required(self) -> bool:
-        return bool(self.must_exist)
+    def required(self) -> bool | None:
+        return self.must_exist
 
     @required.setter
-    def required(self, value: bool):
+    def required(self, value: bool | None):
         self.must_exist = value
 
     @property
@@ -304,9 +326,11 @@ class Validator:
             )
             # merge source metadata into original settings for history inspect
             # use getattr to cheat mypy
-            if (d1 := getattr(settings, "_loaded_by_loaders", None)) and (
-                d2 := getattr(env_settings, "_loaded_by_loaders")
+            if (d1 := getattr(settings, "loaded_by_loaders")) and (
+                d2 := getattr(env_settings, "loaded_by_loaders")
             ):
+                d1 = settings.loaded_by_loaders  # type: ignore
+                d2 = env_settings.loaded_by_loaders  # type: ignore
                 d1.update(d2)
 
     def _validate_names(
@@ -332,11 +356,10 @@ class Validator:
                 continue
 
             if self.default is not empty:
-                default_value = (
-                    self.default(settings, self)
-                    if callable(self.default)
-                    else self.default
-                )
+                if callable(self.default) and self.should_call_lazy:
+                    default_value = self.default(settings, self)
+                else:
+                    default_value = self.default
             else:
                 default_value = empty
 
@@ -353,10 +376,12 @@ class Validator:
                 default_value = f"'{default_value}'"
 
             # NOTE: must stop mutating settings here
-            if getattr(settings, "_store", None):
+            is_dynaconf_settings = getattr(settings, "__core__", False)
+            if is_dynaconf_settings:
                 try:
                     # settings is a Dynaconf instance
-                    value = getattr(settings, "setdefault")(  #  cheat mypy
+                    _setdefault = getattr(settings, "setdefault")
+                    value = _setdefault(  #  cheat mypy
                         name,
                         default_value,
                         apply_default_on_none=self.apply_default_on_none,
@@ -367,31 +392,45 @@ class Validator:
             else:
                 value = settings.get(name, default_value)
 
-            # is name required but not exists?
-            if self.must_exist is True and value is empty:
-                _message = self.messages["must_exist_true"].format(
-                    name=name, env=env
+            # Existence checks
+            if self.must_exist is None:  # must_exist is unset
+                if value is empty:
+                    continue  #  no further checks required, as there is nothing to check
+                else:
+                    pass  # proceed with further checks
+            elif self.must_exist is True:
+                if value is empty:
+                    _message = self.messages["must_exist_true"].format(
+                        name=name, env=env
+                    )
+                    raise ValidationError(_message, details=[(self, _message)])
+                else:
+                    pass
+            elif self.must_exist is False:
+                if value is empty:
+                    continue  # value absent as required — nothing further to check
+                else:
+                    _message = self.messages["must_exist_false"].format(
+                        name=name, env=env
+                    )
+                    raise ValidationError(_message, details=[(self, _message)])
+            else:
+                raise ValueError(
+                    f"must_exist must be True, False, or None, got {self.must_exist!r}"
                 )
-                raise ValidationError(_message, details=[(self, _message)])
-
-            if self.must_exist is False and value is not empty:
-                _message = self.messages["must_exist_false"].format(
-                    name=name, env=env
-                )
-                raise ValidationError(_message, details=[(self, _message)])
-
-            if self.must_exist in (False, None) and value is empty:
-                continue
 
             # value or default value already set
             # by settings.setdefault above
             # however we need to cast it
             # so we call .set again
             # NOTE: we must stop mutating settings here
-            value = self.cast(settings.get(name))
+            if self.should_call_lazy:
+                value = self.cast(settings.get(name))
             if _set := getattr(settings, "set", None):
                 # Settings is Dynaconf
-                _set(name, value, validate=False)
+                _set(
+                    name, value, validate=False, loader_identifier="validator"
+                )
             else:
                 # settings is a dict
                 settings[name] = value
@@ -532,6 +571,12 @@ class CombinedValidator(Validator):
         raise NotImplementedError(
             "subclasses OrValidator or AndValidator implements this method"
         )
+
+    def __repr__(self):
+        result = f"{self.__class__.__name__}("
+        result += ", ".join(repr(v) for v in self.validators)
+        result += ")"
+        return result
 
 
 class OrValidator(CombinedValidator):

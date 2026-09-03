@@ -115,6 +115,25 @@ def test_list(testdir):
     assert "TEST_KEY<str> 'test_value'" in result
 
 
+@pytest.mark.parametrize("cmd", ["list", "inspect", "get"])
+def test_not_found_key_exit_error(cmd, testdir):
+    """Test error code when key not found"""
+    if cmd == "get":
+        command = [cmd, "DONTEXIST"]
+    else:
+        command = [cmd, "-k", "DONTEXIST"]
+
+    result = run(
+        command,
+        env={
+            "ROOT_PATH_FOR_DYNACONF": testdir,
+            "INSTANCE_FOR_DYNACONF": "tests.config.settings",
+        },
+        attr="exit_code",
+    )
+    assert result == 1
+
+
 def test_get(testdir):
     """Tests get command"""
     result = run(
@@ -446,48 +465,86 @@ host = "test.com"
 """
 
 
-def test_validate(tmpdir):
-    validation_file = tmpdir.join("dynaconf_validators.toml")
-    validation_file.write(VALIDATION)
+class TestValidate:
+    def _run_validate(
+        self,
+        *,
+        settings_mod: str,
+        validation_file: str,
+        env: dict | None = None,
+    ) -> str:
+        return run(
+            ["-i", settings_mod, "validate", "-p", validation_file], env
+        )
 
-    toml_valid = tmpdir.mkdir("valid").join("settings.toml")
-    toml_valid.write(TOML_VALID)
+    def test_basic(self, create_file):
+        validators_toml = create_file("dynaconf_validators.toml", VALIDATION)
+        toml_valid = create_file("settings_valid.toml", TOML_VALID)
+        toml_invalid = create_file("settings_invalid.toml", TOML_INVALID)
 
-    toml_invalid = tmpdir.mkdir("invalid").join("settings.toml")
-    toml_invalid.write(TOML_INVALID)
+        result = self._run_validate(
+            settings_mod="tests.config.settingsenv",
+            validation_file=str(validators_toml),
+            env={"SETTINGS_FILE_FOR_DYNACONF": str(toml_valid)},
+        )
+        assert "Validation success!" in result
 
-    result = run(
+        result = self._run_validate(
+            settings_mod="tests.test_cli.settings",
+            validation_file=str(validators_toml.parent),
+            env={"SETTINGS_FILE_FOR_DYNACONF": str(toml_invalid)},
+        )
+        assert "age must lte 30 but it is 35 in env default" in result
+        assert (
+            "project must eq hello_world but it is This is not hello_world "
+            "in env production" in result
+        )
+        assert (
+            "host must is_not_in ['test.com'] but it is test.com in env "
+            "production" in result
+        )
+        assert "Validation success!" not in result
+
+    @pytest.mark.parametrize(
+        "environments, expected",
         [
-            "-i",
-            "tests.config.settingsenv",
-            "validate",
-            "-p",
-            str(validation_file),
+            pytest.param(True, "Validation error!", id="environments-enabled"),
+            pytest.param(
+                False, "Validation success!", id="environments-disabled"
+            ),
+            # In this last case, 'main' is considered a regular field, and it doesn't have
+            # a validator a must_exist rule. 'staryear' must exist, but if it's
+            # parent "main" (not an env here!) doesnt exist, which is fine, the
+            # validator doesn't apply. This is the most strict interpretation, and
+            # having the 'must_exist' rule propagate, that's it, require 'main' to exist,
+            # can be considered a new feature
         ],
-        {"SETTINGS_FILE_FOR_DYNACONF": str(toml_valid)},
     )
-    assert "Validation success!" in result
+    def test_issue_1368(self, create_file, environments: bool, expected: str):
+        """Section-based validators in dynaconf_validators.toml with a non-default section name.
 
-    result = run(
-        [
-            "-i",
-            "tests.test_cli.settings",
-            "validate",
-            "-p",
-            str(Path(str(validation_file)).parent),
-        ],
-        {"SETTINGS_FILE_FOR_DYNACONF": str(toml_invalid)},
-    )
-    assert "age must lte 30 but it is 35 in env default" in result
-    assert (
-        "project must eq hello_world but it is This is not hello_world "
-        "in env production" in result
-    )
-    assert (
-        "host must is_not_in ['test.com'] but it is test.com in env "
-        "production" in result
-    )
-    assert "Validation success!" not in result
+        https://github.com/dynaconf/dynaconf/issues/1368
+        """
+        module = f"config_{environments}"
+        create_file(
+            f"{module}.py",
+            f"""
+            from dynaconf import Dynaconf
+            settings = Dynaconf(environments={environments})
+            """,
+        )
+        validators_toml = create_file(
+            "dynaconf_validators.toml",
+            """
+            [main]
+            startyear = {must_exist=true}
+            """,
+        )
+        result = self._run_validate(
+            settings_mod=f"{module}.settings",
+            validation_file=str(validators_toml),
+        )
+        assert expected in result
 
 
 def create_file(filename: str | Path, data: str):
@@ -549,7 +606,7 @@ def test_inspect_no_args(tmp_path):
           "history": [
             {
               "loader": "env_global",
-              "identifier": "unique",
+              "identifier": "DYNACONF",
               "env": "global",
               "merged": false,
               "value": {
@@ -595,7 +652,7 @@ def test_inspect_yaml_format(tmp_path):
           FOO: from_environ_yaml_format
         history:
         - loader: env_global
-          identifier: unique
+          identifier: DYNACONF
           env: global
           merged: false
           value:
@@ -742,7 +799,7 @@ def test_inspect_limit(tmp_path):
           "history": [
             {
               "loader": "env_global",
-              "identifier": "unique",
+              "identifier": "DYNACONF",
               "env": "global",
               "merged": false,
               "value": {

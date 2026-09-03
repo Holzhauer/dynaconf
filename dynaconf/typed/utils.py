@@ -1,7 +1,7 @@
 from __future__ import annotations  # WARNING: remove this when debugging
 
+from collections.abc import Callable
 from typing import Annotated
-from typing import Callable
 from typing import get_args
 from typing import get_origin
 from typing import Union
@@ -67,7 +67,7 @@ def is_union(annotation) -> bool:
 
 def is_optional(annotation) -> bool:
     """Tell if an annotation is strictly typing.Optional or Union[**, None]"""
-    return is_union(annotation) and get_args(annotation)[1] == type(None)
+    return is_union(annotation) and get_args(annotation)[1] is type(None)
 
 
 def is_type(value) -> bool:

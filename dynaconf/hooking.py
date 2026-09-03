@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from functools import wraps
 from typing import Any
-from typing import Callable
 
 from dynaconf.base import Settings
 from dynaconf.loaders.base import SourceMetadata
@@ -18,6 +18,7 @@ __all__ = [
     "MethodValue",
     "Action",
     "HookableSettings",
+    "post_hook",
 ]
 
 
@@ -116,7 +117,7 @@ def hookable(function=None, name=None):
                 identifier=f"{function_name}_hook_({hook_names})",
                 merged=True,
             )
-            history = self._loaded_by_loaders.setdefault(metadata, {})
+            history = self.loaded_by_loaders.setdefault(metadata, {})
             key = args[0] if args else kwargs.get("key")
             history[key] = value.value
 
@@ -156,8 +157,8 @@ def get_hooks(obj):
             return getattr(obj, key)
         elif isinstance(obj, dict) and key in obj:
             return obj[key]
-        elif hasattr(obj, "_store") and key in obj._store:
-            return obj._store[key]
+        elif hasattr(obj, "store") and key in obj.store:
+            return obj.store[key]
     return {}
 
 
@@ -313,7 +314,7 @@ class TempSettingsHolder:
             self._temp_settings = Settings(
                 dynaconf_skip_loaders=True,
                 dynaconf_skip_validators=True,
-                _store=self._original_settings._store._safe_copy(),
+                _store=self._original_settings.store.copy(bypass_eval=True),
             )
         return self._temp_settings
 
@@ -337,3 +338,41 @@ class TempSettingsHolder:
             super().__setattr__(attr, value)
         else:
             setattr(self._settings, attr, value)
+
+
+def post_hook(function: Callable) -> Callable:
+    """This decorator marks a function as a post hook.
+    This works by adding the _dynaconf_hook attribute to the function,
+    then the python loader, when reading the module, will look for
+    this attribute and register the function as a post_hook for the settings.
+
+    e.g: On a settings file with .py extension:
+
+    from dynaconf import post_hook
+    @post_hook
+    def set_log_handlers(settings) -> dict:
+        data = {}  # data to be merged into settings
+
+        # conditionals
+        if (logging := settings.get('LOGGING')) is not None:
+            # do something with logging
+            # add it back to data
+            data['LOGGING'] = logging
+        return data
+    """
+    try:
+        function._dynaconf_hook = True  # type: ignore
+        function._called = False  # type: ignore
+        function._dynaconf_hook_source = function.__module__  # type: ignore
+    except (AttributeError, TypeError):
+        raise TypeError(
+            "post_hook decorator must be applied to a function or method."
+        )
+    else:
+        # On the same scope where the decorated function is defined we
+        # add a variable with the same name as the function but prefixed
+        # with _dynaconf_hook_ this variable will be used by the loader
+        # to register the function as a post_hook
+        function.__globals__[f"_dynaconf_hook_{function.__name__}"] = function
+
+    return function
