@@ -19,9 +19,8 @@ from typing import Any
 from typing import Optional
 from typing import Union
 
-from dynaconf.config import AHIDConfig
-
 from dynaconf import default_settings
+from dynaconf.config import AHIDConfig
 from dynaconf.loaders import default_loader
 from dynaconf.loaders import enable_external_loaders
 from dynaconf.loaders import env_loader
@@ -1151,7 +1150,7 @@ class Settings:
         loader_identifier: SourceMetadata | str | None = None,
         tomlfy=False,
         dotted_lookup=empty,
-        is_secret="DeprecatedArgument",  # noqa
+        is_secret="DeprecatedArgument",
         validate=empty,
         merge=empty,
         tomlfy_filter: tuple[str, ...] | None = None,
@@ -1322,7 +1321,7 @@ class Settings:
         loader_identifier=None,
         tomlfy=False,
         merge=empty,
-        is_secret="DeprecatedArgument",  # noqa
+        is_secret="DeprecatedArgument",
         dotted_lookup=empty,
         validate=empty,
         tomlfy_filter=None,
@@ -1795,11 +1794,11 @@ class Settings:
         warnings.warn(
             "logger and DEBUG messages has been removed on dynaconf 3.0.0"
         )
-        import logging  # noqa
+        import logging
 
         return logging.getLogger("dynaconf")
 
-    def is_overridden(self, setting):  # noqa
+    def is_overridden(self, setting):
         """This is to provide Django DJDT support: issue 382"""
         return False
 

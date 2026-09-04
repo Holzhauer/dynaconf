@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 import inspect
-from functools import wraps
 import warnings
+from functools import wraps
 from typing import Any
 
+from dynaconf.config import AHIDConfig
 from dynaconf.nodes import DataDict
 from dynaconf.nodes import recursively_evaluate_lazy_format
 from dynaconf.utils import find_the_correct_casing
 from dynaconf.utils.functional import empty
 from dynaconf.vendor.box import Box
-from dynaconf.config import AHIDConfig
+
 
 class DynaBox(DataDict):
     def __init__(self, *args, **kwargs):
@@ -22,6 +23,7 @@ class DynaBox(DataDict):
         )
         super().__init__(*args, **kwargs)
 
+
 def evaluate_lazy_format(f):
     """Marks a method on Dynabox instance to
     lazily evaluate LazyFormat objects upon access."""
@@ -29,15 +31,14 @@ def evaluate_lazy_format(f):
     @wraps(f)
     def evaluate(dynabox, item, *args, **kwargs):
         value = f(dynabox, item, *args, **kwargs)
-    
+
         # UNDO SH
         if AHIDConfig.evaluate:
-            
             if getattr(value, "_dynaconf_lazy_format", None):
                 dynabox._box_config[f"raw_{item.lower()}"] = (
-                f"@{value.formatter.token} {value.value}"
-            )
-            
+                    f"@{value.formatter.token} {value.value}"
+                )
+
             settings = dynabox._box_config["box_settings"]
             return recursively_evaluate_lazy_format(value, settings)
         else:
@@ -55,7 +56,7 @@ class _DynaBox(Box):
             result = super().__getattr__(item, *args, **kwargs)
         except (AttributeError, KeyError):
             if AHIDConfig.evaluate:
-                item = find_the_correct_casing(item, self) or item
+                n_item = find_the_correct_casing(item, tuple(self.keys())) or item
             result = super().__getattr__(n_item, *args, **kwargs)
         return self.__evaluate_lazy__(result)
 
@@ -64,8 +65,10 @@ class _DynaBox(Box):
             result = super().__getitem__(item, *args, **kwargs)
         except (AttributeError, KeyError):
             if AHIDConfig.evaluate:
-                item = find_the_correct_casing(item, tuple(self.keys())) or item
-            result = super().__getitem__(item, *args, **kwargs)
+                n_item = (
+                    find_the_correct_casing(item, tuple(self.keys())) or item
+                )
+            result = super().__getitem__(n_item, *args, **kwargs)
         return self.__evaluate_lazy__(result)
 
     def get(
@@ -81,8 +84,10 @@ class _DynaBox(Box):
             return super().__getitem__(item, *args, **kwargs)
         except (AttributeError, KeyError):
             if AHIDConfig.evaluate:
-                item = find_the_correct_casing(item, tuple(self.keys())) or item
-            return super().__getitem__(item, *args, **kwargs)
+                n_item = (
+                    find_the_correct_casing(item, tuple(self.keys())) or item
+                )
+            return super().__getitem__(n_item, *args, **kwargs)
 
     def __evaluate_lazy__(self, result):
         settings = self._box_config["box_settings"]
@@ -104,13 +109,6 @@ class _DynaBox(Box):
             {k: self.get(k, bypass_eval=True) for k in self.keys()},
             box_settings=self._box_config.get("box_settings"),
         )
-
-    @evaluate_lazy_format
-    def get(self, item, default=None, *args, **kwargs):
-        if AHIDConfig.evaluate:
-            item = find_the_correct_casing(item, self) or item
-        value = super().get(item, empty, *args, **kwargs)
-        return value if value is not empty else default
 
     def __dir__(self):
         keys = list(self.keys())
