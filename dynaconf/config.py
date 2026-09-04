@@ -8,7 +8,7 @@ import logging
 
 logger = logging.getLogger("dynconf.custom")
 
-class AHIDConfig(object):
+class AHIDConfig:
     '''
     classdocs
     '''
@@ -20,6 +20,6 @@ class AHIDConfig(object):
         '''
         Constructor
         '''
-        logger.warn("Use AHIDConfig...")
+        logger.warning("Use AHIDConfig...")
         
         
