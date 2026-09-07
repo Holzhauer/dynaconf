@@ -56,7 +56,9 @@ class _DynaBox(Box):
             result = super().__getattr__(item, *args, **kwargs)
         except (AttributeError, KeyError):
             if AHIDConfig.evaluate:
-                n_item = find_the_correct_casing(item, tuple(self.keys())) or item
+                n_item = (
+                    find_the_correct_casing(item, tuple(self.keys())) or item
+                )
             result = super().__getattr__(n_item, *args, **kwargs)
         return self.__evaluate_lazy__(result)
 

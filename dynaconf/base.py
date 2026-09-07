@@ -1125,7 +1125,9 @@ class Settings:
                 old=old_data,
                 new=new_data,
                 full_path=split_keys,
-                list_merge="merge" if merge is empty or merge else "shallow"  # when to use deep / shallow replace?
+                list_merge="merge"
+                if merge is empty or merge
+                else "shallow",  # when to use deep / shallow replace?
             )
         # `new_data` is keyed by the already-resolved top level key
         # (`split_keys[0]`). With index merge disabled a bracket is a literal
@@ -1261,7 +1263,9 @@ class Settings:
             if existing:
                 # update SourceMetadata (for inspecting purposes)
                 source_metadata = source_metadata._replace(merged=True)
-                parsed = object_merge(existing, parsed.unwrap(), list_merge="merge")
+                parsed = object_merge(
+                    existing, parsed.unwrap(), list_merge="merge"
+                )
             else:
                 parsed = parsed.unwrap()
 
@@ -1381,7 +1385,7 @@ class Settings:
         value,
         identifier: SourceMetadata | None = None,
         context_merge=empty,
-        list_merge=None, #"merge",
+        list_merge=None,  # "merge",
     ):
         """
         Merge the new value being set with the existing value before set

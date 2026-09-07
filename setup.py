@@ -40,7 +40,10 @@ setup(
     license="MIT",
     license_files=["LICENSE", "vendor_licenses/*"],
     author=["Bruno Rocha", "Sascha Holzhuaer"],
-    author_email=["rochacbruno@gmail.com", "sascha.holzhauer@iee.fraunhofer.de"],
+    author_email=[
+        "rochacbruno@gmail.com",
+        "sascha.holzhauer@iee.fraunhofer.de",
+    ],
     description="The dynamic configurator for your Python Project",
     long_description=read("README.md"),
     long_description_content_type="text/markdown",
