@@ -317,7 +317,7 @@ def test_merge_existing_list():
 
     new = ["erik", "bruno"]
     object_merge(existing, new)
-    assert new == ["bruno", "karla", "erik", "bruno"]
+    assert new == ["erik", "bruno"]
 
 
 def test_merge_existing_list_unique():

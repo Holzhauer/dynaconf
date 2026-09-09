@@ -1109,9 +1109,8 @@ class Settings:
                     raise (ValueError("Invalid field:", k))
 
         if "loader_identifier" in kwargs:
-            merge = kwargs["loader_identifier"].merged
-        else:
-            merge = empty
+            if kwargs["loader_identifier"].merged:
+                list_merge = "merge"
 
         if existing_data:
             if config.dynaboxify:
@@ -1125,9 +1124,8 @@ class Settings:
                 old=old_data,
                 new=new_data,
                 full_path=split_keys,
-                list_merge="merge"
-                if merge is empty or merge
-                else "shallow",  # when to use deep / shallow replace?
+                # important to pass distinction merge/deep/shallow
+                list_merge=list_merge,
             )
         # `new_data` is keyed by the already-resolved top level key
         # (`split_keys[0]`). With index merge disabled a bracket is a literal
@@ -1254,7 +1252,10 @@ class Settings:
             if existing:
                 # update SourceMetadata (for inspecting purposes)
                 source_metadata = source_metadata._replace(merged=True)
-                parsed = object_merge(existing, parsed.unwrap(), unique=True)
+                parsed = object_merge(
+                    existing, parsed.unwrap(), list_merge="merge",
+                    unique=True
+                )
             else:
                 parsed = parsed.unwrap()
 
@@ -1425,7 +1426,9 @@ class Settings:
                 identifier = (
                     identifier._replace(merged=True) if identifier else None
                 )
-                value = object_merge(existing, value, unique=unique)
+                value = object_merge(existing, value,
+                                     list_merge="merge",
+                                     unique=unique)
         return value, identifier
 
     @property

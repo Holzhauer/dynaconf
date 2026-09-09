@@ -358,7 +358,8 @@ def test_global_set_merge(settings):
         "MERGE_KEY", {"items": [{"name": "item 1"}, {"name": "item 2"}]}
     )
     settings.set(
-        "MERGE_KEY", {"items": [{"name": "item 3"}, {"name": "item 4"}]}
+        "MERGE_KEY", {"items": [{"name": "item 3"}, {"name": "item 4"}]},
+        merge=True
     )
     assert settings.MERGE_KEY == {
         "items": [
@@ -480,7 +481,7 @@ def test_local_set_merge_false_dict():
     settings_a.set("default", {"dicty": dict_new, "listy": [9999]})
 
     assert settings_a.default.dicty.a.b == {"key_new": "from_new"}
-    assert settings_a.default.listy == [1, 2, 3, 9999]
+    assert settings_a.default.listy == [9999]
 
     # environment = True
     settings_b = Dynaconf(
@@ -492,7 +493,7 @@ def test_local_set_merge_false_dict():
     settings_b.set("test", {"dicty": dict_old, "listy": [1, 2, 3]})
     settings_b.set("test", {"dicty": dict_new, "listy": [9999]})
     assert settings_b.test.dicty.a.b == {"key_new": "from_new"}
-    assert settings_b.test.listy == [1, 2, 3, 9999]
+    assert settings_b.test.listy == [9999]
 
 
 def test_set_explicit_merge_token(tmpdir):
@@ -697,7 +698,7 @@ def test_set_new_merge_issue_241_3(tmpdir):
 
     settings = LazySettings(settings_file="settings.toml")
     assert settings.NAME == "Tommy Shelby"
-    assert settings.COLORS == ["red", "green", "yellow", "pink"]
+    assert settings.COLORS == ["yellow", "pink"]
     assert settings.DATA.links == {"site": "pb.com"}
 
 

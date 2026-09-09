@@ -227,6 +227,7 @@ def handle_metavalues(
                 old.get(key),
                 new[key].unwrap(),
                 unique=new[key].unique,
+                list_merge="merge",
             )
         elif getattr(new[key], "_dynaconf_insert", False):
             # Insert on `new` triggers insert with existing data
