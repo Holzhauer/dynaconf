@@ -1573,7 +1573,7 @@ def test_list_entries_from_yaml_should_not_duplicate_when_merged(tmpdir):
 
     expected_default_value = DataList(["item_1", "item_2", "item_3"])
     expected_other_value = DataList(
-        ["item_1", "item_2", "item_3", "item_4", "item_5"]
+        ["item_4", "item_5"]
     )
 
     assert expected_default_value == settings.from_env("default").SOME_LIST

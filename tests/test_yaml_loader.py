@@ -463,9 +463,6 @@ def test_should_not_duplicate_with_global_merge(tmpdir):
     other_settings = settings.from_env("other")
     assert other_settings.SOME_KEY == "new_value"
     assert other_settings.SOME_LIST == [
-        "item_1",
-        "item_2",
-        "item_3",
         "item_4",
         "item_5",
     ]

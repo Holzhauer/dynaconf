@@ -1420,7 +1420,7 @@ class Settings:
                 local_merge = True
                 unique = True
 
-            if local_merge or (context_merge and local_merge is not False):
+            if local_merge:
                 identifier = (
                     identifier._replace(merged=True) if identifier else None
                 )

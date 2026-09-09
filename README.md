@@ -20,7 +20,8 @@
 - Built-in extensions for **Django** and **Flask** web frameworks.
 - CLI for common operations such as `init, list, write, validate, export`.
 - full docs on https://dynaconf.com
-
+- This fork: Overriding as default merge behaviour for lists (even if merge_enabled=True, and when environments=True)
+ 
 ### Install
 
 ```bash

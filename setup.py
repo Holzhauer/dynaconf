@@ -39,7 +39,7 @@ setup(
     url="https://github.com/dynaconf/dynaconf",
     license="MIT",
     license_files=["LICENSE", "vendor_licenses/*"],
-    author=["Bruno Rocha", "Sascha Holzhuaer"],
+    author=["Bruno Rocha", "Sascha Holzhauer"],
     author_email=[
         "rochacbruno@gmail.com",
         "sascha.holzhauer@iee.fraunhofer.de",
