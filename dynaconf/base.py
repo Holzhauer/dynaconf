@@ -1138,7 +1138,6 @@ class Settings:
             validate=validate,
             tomlfy_filter=tomlfy_filter,
             dotted_lookup=False,
-            merge=merge,
             **kwargs,
         )
 
@@ -1253,8 +1252,7 @@ class Settings:
                 # update SourceMetadata (for inspecting purposes)
                 source_metadata = source_metadata._replace(merged=True)
                 parsed = object_merge(
-                    existing, parsed.unwrap(), list_merge="merge",
-                    unique=True
+                    existing, parsed.unwrap(), list_merge="merge", unique=True
                 )
             else:
                 parsed = parsed.unwrap()
@@ -1426,9 +1424,9 @@ class Settings:
                 identifier = (
                     identifier._replace(merged=True) if identifier else None
                 )
-                value = object_merge(existing, value,
-                                     list_merge="merge",
-                                     unique=unique)
+                value = object_merge(
+                    existing, value, list_merge="merge", unique=unique
+                )
         return value, identifier
 
     @property

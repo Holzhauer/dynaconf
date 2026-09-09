@@ -358,8 +358,9 @@ def test_global_set_merge(settings):
         "MERGE_KEY", {"items": [{"name": "item 1"}, {"name": "item 2"}]}
     )
     settings.set(
-        "MERGE_KEY", {"items": [{"name": "item 3"}, {"name": "item 4"}]},
-        merge=True
+        "MERGE_KEY",
+        {"items": [{"name": "item 3"}, {"name": "item 4"}]},
+        merge=True,
     )
     assert settings.MERGE_KEY == {
         "items": [
